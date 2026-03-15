@@ -568,6 +568,7 @@ def _get_required_tools():
         tools.append(('xdotool', 'xdotool'))
     elif backend == 'ydotool':
         tools.append(('ydotool', 'ydotool'))
+        tools.append(('ydotoold', 'ydotool'))  # Usually in the same package
     elif backend == 'wtype':
         tools.append(('wtype', 'wtype'))
     # Clipboard tool
@@ -580,12 +581,20 @@ def _get_required_tools():
 
 def _check_ydotoold():
     """Check if the ydotoold daemon is running; offer to start it if not."""
+    # Ensure client knows where to look for root socket if it exists
+    if not os.environ.get('YDOTOOL_SOCKET'):
+        for path in ['/run/ydotoold.socket', '/tmp/.ydotool_socket', f'/run/user/{os.getuid()}/.ydotool_socket']:
+            if os.path.exists(path):
+                os.environ['YDOTOOL_SOCKET'] = path
+                break
+
     # Check if ydotoold process is already running
     try:
         result = subprocess.run(['pgrep', '-x', 'ydotoold'],
                                 capture_output=True, timeout=3)
         if result.returncode == 0:
             print(f"  {C.GREEN}✓ ydotoold daemon is running{C.RESET}")
+            # Ensure socket env is set for our subprocess calls
             return True
     except Exception:
         pass
@@ -598,7 +607,6 @@ def _check_ydotoold():
     try:
         r = subprocess.run(['systemctl', '--user', 'status', 'ydotool'],
                            capture_output=True, text=True, timeout=3)
-        # service unit exists if exit code is 0 (active) or 3 (inactive) but not 4 (not found)
         has_systemd_service = r.returncode in (0, 3)
     except Exception:
         pass
@@ -611,7 +619,7 @@ def _check_ydotoold():
             result = subprocess.run(['systemctl', '--user', 'start', 'ydotool'],
                                     capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
-                time.sleep(0.5)  # Give daemon a moment to start
+                time.sleep(0.5)
                 print(f"\n  {C.GREEN}{C.BOLD}✓ ydotoold started!{C.RESET}")
                 return True
             else:
@@ -622,14 +630,16 @@ def _check_ydotoold():
         answer = input(f"  {C.GREEN}{C.BOLD}▶ Start ydotoold now? [Y/n]: {C.RESET}").strip().lower()
         if answer in ('', 'y', 'yes'):
             try:
-                subprocess.Popen(['sudo', 'ydotoold'],
+                # Explicitly create socket in /tmp so it's accessible
+                socket_path = '/tmp/.ydotool_socket'
+                os.environ['YDOTOOL_SOCKET'] = socket_path
+                subprocess.Popen(['sudo', 'ydotoold', '--socket-path', socket_path, '--socket-own', f'{os.getuid()}:{os.getgid()}'],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(1)  # Give daemon a moment to start
-                # Verify it started
+                time.sleep(1)
                 r = subprocess.run(['pgrep', '-x', 'ydotoold'],
                                    capture_output=True, timeout=3)
                 if r.returncode == 0:
-                    print(f"\n  {C.GREEN}{C.BOLD}✓ ydotoold started!{C.RESET}")
+                    print(f"\n  {C.GREEN}{C.BOLD}✓ ydotoold started (socket: {socket_path})!{C.RESET}")
                     return True
                 else:
                     print(f"\n  {C.RED}✗ ydotoold does not appear to be running{C.RESET}")
