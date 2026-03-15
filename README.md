@@ -40,7 +40,7 @@ That's it. The script will detect your platform, check for dependencies, show a 
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/humantyper.git
+git clone https://github.com/yofriendfromschool1/Universal-Human-Paster-Typer.git
 cd humantyper
 ```
 
