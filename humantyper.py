@@ -86,6 +86,24 @@ def clear_screen():
 #  PLATFORM DETECTION
 # ═══════════════════════════════════════════════════════════
 
+def _wtype_works():
+    """Probe whether wtype can actually type on this compositor.
+    Many compositors (GNOME Mutter, KDE KWin) do not support
+    the virtual-keyboard Wayland protocol that wtype requires."""
+    if not shutil.which('wtype'):
+        return False
+    try:
+        # Use a harmless non-printing key to probe protocol support
+        r = subprocess.run(['wtype', '-k', 'Pause'],
+                           capture_output=True, text=True, timeout=3)
+        # If wtype reports the compositor doesn't support the protocol, it won't work
+        if 'does not support' in (r.stderr or '').lower():
+            return False
+        # Exit code 0 means the protocol is supported and the key was sent
+        return True
+    except Exception:
+        return False
+
 def detect_platform():
     """Detect OS, display server, Linux distro, and package manager."""
     info = {'os': None, 'display': None, 'distro': None, 'pkg_manager': None}
@@ -102,15 +120,17 @@ def detect_platform():
             info['display'] = 'tty'
         info['distro'] = _detect_linux_distro()
         info['pkg_manager'] = _detect_pkg_manager()
-        # Resolve typing backend: on Wayland, prefer xdotool (works via XWayland)
-        # and fall back to wtype if xdotool isn't available
+        # Resolve typing backend: on Wayland, prefer ydotool (kernel uinput,
+        # works on all compositors incl. GNOME/Mutter/KDE), then wtype only
+        # if the compositor actually supports the virtual-keyboard protocol.
+        # xdotool cannot inject input into native Wayland windows.
         if info['display'] == 'wayland':
-            if shutil.which('xdotool'):
-                info['typing_backend'] = 'xdotool'
-            elif shutil.which('wtype'):
+            if shutil.which('ydotool'):
+                info['typing_backend'] = 'ydotool'
+            elif _wtype_works():
                 info['typing_backend'] = 'wtype'
             else:
-                info['typing_backend'] = 'xdotool'  # will prompt install
+                info['typing_backend'] = 'ydotool'  # will prompt install
         elif info['display'] == 'x11':
             info['typing_backend'] = 'xdotool'
         # Resolve clipboard backend: Wayland can fallback to xclip too
@@ -142,7 +162,12 @@ def detect_platform():
         info['os'] = 'freebsd'
         if os.environ.get('WAYLAND_DISPLAY'):
             info['display'] = 'wayland'
-            info['typing_backend'] = 'wtype' if shutil.which('wtype') else 'xdotool'
+            if shutil.which('ydotool'):
+                info['typing_backend'] = 'ydotool'
+            elif _wtype_works():
+                info['typing_backend'] = 'wtype'
+            else:
+                info['typing_backend'] = 'ydotool'
             info['clipboard_backend'] = 'wl-paste' if shutil.which('wl-paste') else 'xclip'
         elif os.environ.get('DISPLAY'):
             info['display'] = 'x11'
@@ -263,6 +288,8 @@ def type_char(char):
     try:
         if backend == 'xdotool':
             return _x11_type_char(char)
+        elif backend == 'ydotool':
+            return _ydotool_type_char(char)
         elif backend == 'wtype':
             return _wayland_type_char(char)
         elif backend == 'osascript':
@@ -283,6 +310,9 @@ def type_backspace(count=1):
         try:
             if backend == 'xdotool':
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'BackSpace'],
+                               timeout=2, capture_output=True)
+            elif backend == 'ydotool':
+                subprocess.run(['ydotool', 'key', '14:1', '14:0'],
                                timeout=2, capture_output=True)
             elif backend == 'wtype':
                 subprocess.run(['wtype', '-k', 'BackSpace'],
@@ -329,7 +359,74 @@ def _x11_type_char(char):
     return True
 
 
-# ── Wayland (wtype) ───────────────────────────────────────
+# ── Wayland (ydotool — kernel uinput) ─────────────────────
+
+# ydotool uses Linux evdev keycodes (not X11 keysyms).
+# Map printable ASCII to (keycode, shift?) pairs.
+_YDOTOOL_SPECIAL_KEYS = {
+    '\n': 28,   # KEY_ENTER
+    '\t': 15,   # KEY_TAB
+    ' ': 57,    # KEY_SPACE
+}
+
+_YDOTOOL_KEYMAP = {
+    'a': (30, False), 'b': (48, False), 'c': (46, False), 'd': (32, False),
+    'e': (18, False), 'f': (33, False), 'g': (34, False), 'h': (35, False),
+    'i': (23, False), 'j': (36, False), 'k': (37, False), 'l': (38, False),
+    'm': (50, False), 'n': (49, False), 'o': (24, False), 'p': (25, False),
+    'q': (16, False), 'r': (19, False), 's': (31, False), 't': (20, False),
+    'u': (22, False), 'v': (47, False), 'w': (17, False), 'x': (45, False),
+    'y': (21, False), 'z': (44, False),
+    '1': (2, False),  '2': (3, False),  '3': (4, False),  '4': (5, False),
+    '5': (6, False),  '6': (7, False),  '7': (8, False),  '8': (9, False),
+    '9': (10, False), '0': (11, False),
+    '-': (12, False), '=': (13, False), '[': (26, False), ']': (27, False),
+    '\\': (43, False), ';': (39, False), "'": (40, False), '`': (41, False),
+    ',': (51, False), '.': (52, False), '/': (53, False),
+    # Shifted variants
+    'A': (30, True), 'B': (48, True), 'C': (46, True), 'D': (32, True),
+    'E': (18, True), 'F': (33, True), 'G': (34, True), 'H': (35, True),
+    'I': (23, True), 'J': (36, True), 'K': (37, True), 'L': (38, True),
+    'M': (50, True), 'N': (49, True), 'O': (24, True), 'P': (25, True),
+    'Q': (16, True), 'R': (19, True), 'S': (31, True), 'T': (20, True),
+    'U': (22, True), 'V': (47, True), 'W': (17, True), 'X': (45, True),
+    'Y': (21, True), 'Z': (44, True),
+    '!': (2, True),  '@': (3, True),  '#': (4, True),  '$': (5, True),
+    '%': (6, True),  '^': (7, True),  '&': (8, True),  '*': (9, True),
+    '(': (10, True), ')': (11, True),
+    '_': (12, True), '+': (13, True), '{': (26, True), '}': (27, True),
+    '|': (43, True), ':': (39, True), '"': (40, True), '~': (41, True),
+    '<': (51, True), '>': (52, True), '?': (53, True),
+}
+
+def _ydotool_type_char(char):
+    """Type a single character using ydotool (kernel uinput)."""
+    # Special keys (Enter, Tab, Space)
+    if char in _YDOTOOL_SPECIAL_KEYS:
+        kc = _YDOTOOL_SPECIAL_KEYS[char]
+        subprocess.run(['ydotool', 'key', f'{kc}:1', f'{kc}:0'],
+                       timeout=2, capture_output=True)
+        return True
+
+    # Mapped keys (letters, digits, symbols)
+    if char in _YDOTOOL_KEYMAP:
+        kc, shifted = _YDOTOOL_KEYMAP[char]
+        if shifted:
+            # 42 = KEY_LEFTSHIFT
+            subprocess.run(['ydotool', 'key', '42:1', f'{kc}:1', f'{kc}:0', '42:0'],
+                           timeout=2, capture_output=True)
+        else:
+            subprocess.run(['ydotool', 'key', f'{kc}:1', f'{kc}:0'],
+                           timeout=2, capture_output=True)
+        return True
+
+    # Fallback: use ydotool type for any unmapped characters (Unicode etc.)
+    subprocess.run(['ydotool', 'type', '--key-delay', '0', '--', char],
+                   timeout=2, capture_output=True)
+    return True
+
+
+# ── Wayland (wtype — wlroots compositors only) ────────────
 
 def _wayland_type_char(char):
     if char == '\n':
@@ -508,6 +605,8 @@ def _get_required_tools():
     # Typing tool
     if backend == 'xdotool':
         tools.append(('xdotool', 'xdotool'))
+    elif backend == 'ydotool':
+        tools.append(('ydotool', 'ydotool'))
     elif backend == 'wtype':
         tools.append(('wtype', 'wtype'))
     # Clipboard tool
@@ -516,6 +615,71 @@ def _get_required_tools():
     elif cb == 'wl-paste':
         tools.append(('wl-paste', 'wl-clipboard'))
     return tools
+
+
+def _check_ydotoold():
+    """Check if the ydotoold daemon is running; offer to start it if not."""
+    # Check if ydotoold process is already running
+    try:
+        result = subprocess.run(['pgrep', '-x', 'ydotoold'],
+                                capture_output=True, timeout=3)
+        if result.returncode == 0:
+            print(f"  {C.GREEN}✓ ydotoold daemon is running{C.RESET}")
+            return True
+    except Exception:
+        pass
+
+    print(f"\n  {C.YELLOW}{C.BOLD}⚠  ydotoold daemon is not running{C.RESET}")
+    print(f"  {C.DIM}ydotool requires the ydotoold daemon to inject input.{C.RESET}\n")
+
+    # Try systemd user service first
+    has_systemd_service = False
+    try:
+        r = subprocess.run(['systemctl', '--user', 'status', 'ydotool'],
+                           capture_output=True, text=True, timeout=3)
+        # service unit exists if exit code is 0 (active) or 3 (inactive) but not 4 (not found)
+        has_systemd_service = r.returncode in (0, 3)
+    except Exception:
+        pass
+
+    if has_systemd_service:
+        print(f"  {C.CYAN}Start via systemd?{C.RESET}")
+        print(f"  {C.DIM}Command: systemctl --user start ydotool{C.RESET}\n")
+        answer = input(f"  {C.GREEN}{C.BOLD}▶ Start ydotoold now? [Y/n]: {C.RESET}").strip().lower()
+        if answer in ('', 'y', 'yes'):
+            result = subprocess.run(['systemctl', '--user', 'start', 'ydotool'],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                time.sleep(0.5)  # Give daemon a moment to start
+                print(f"\n  {C.GREEN}{C.BOLD}✓ ydotoold started!{C.RESET}")
+                return True
+            else:
+                print(f"\n  {C.RED}✗ Failed to start: {result.stderr.strip()}{C.RESET}")
+    else:
+        print(f"  {C.CYAN}Start ydotoold directly?{C.RESET}")
+        print(f"  {C.DIM}Command: sudo ydotoold &{C.RESET}\n")
+        answer = input(f"  {C.GREEN}{C.BOLD}▶ Start ydotoold now? [Y/n]: {C.RESET}").strip().lower()
+        if answer in ('', 'y', 'yes'):
+            try:
+                subprocess.Popen(['sudo', 'ydotoold'],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)  # Give daemon a moment to start
+                # Verify it started
+                r = subprocess.run(['pgrep', '-x', 'ydotoold'],
+                                   capture_output=True, timeout=3)
+                if r.returncode == 0:
+                    print(f"\n  {C.GREEN}{C.BOLD}✓ ydotoold started!{C.RESET}")
+                    return True
+                else:
+                    print(f"\n  {C.RED}✗ ydotoold does not appear to be running{C.RESET}")
+            except Exception as e:
+                print(f"\n  {C.RED}✗ Failed to start: {e}{C.RESET}")
+
+    print(f"\n  {C.DIM}Start it manually before running HumanTyper:{C.RESET}")
+    print(f"    {C.CYAN}sudo ydotoold &{C.RESET}")
+    print(f"  {C.DIM}Or enable the systemd service:{C.RESET}")
+    print(f"    {C.CYAN}systemctl --user enable --now ydotool{C.RESET}\n")
+    return False
 
 
 def check_dependencies():
@@ -563,6 +727,10 @@ def check_dependencies():
     if not missing:
         tools = ', '.join(t for t, _ in required)
         print(f"\n  {C.GREEN}✓ All dependencies found ({tools}){C.RESET}")
+        # Check if ydotoold daemon is running when using ydotool
+        if PLATFORM.get('typing_backend') == 'ydotool':
+            if not _check_ydotoold():
+                return False
         return True
 
     # Report missing
