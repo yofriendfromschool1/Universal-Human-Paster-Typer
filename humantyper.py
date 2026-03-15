@@ -360,68 +360,29 @@ def _x11_type_char(char):
 
 
 # ── Wayland (ydotool — kernel uinput) ─────────────────────
+#
+# ydotool type handles character→keycode translation internally.
+# We only use ydotool key for non-printable keys (Enter, Tab, etc.)
+# using Linux evdev keycodes.
 
-# ydotool uses Linux evdev keycodes (not X11 keysyms).
-# Map printable ASCII to (keycode, shift?) pairs.
 _YDOTOOL_SPECIAL_KEYS = {
     '\n': 28,   # KEY_ENTER
     '\t': 15,   # KEY_TAB
-    ' ': 57,    # KEY_SPACE
-}
-
-_YDOTOOL_KEYMAP = {
-    'a': (30, False), 'b': (48, False), 'c': (46, False), 'd': (32, False),
-    'e': (18, False), 'f': (33, False), 'g': (34, False), 'h': (35, False),
-    'i': (23, False), 'j': (36, False), 'k': (37, False), 'l': (38, False),
-    'm': (50, False), 'n': (49, False), 'o': (24, False), 'p': (25, False),
-    'q': (16, False), 'r': (19, False), 's': (31, False), 't': (20, False),
-    'u': (22, False), 'v': (47, False), 'w': (17, False), 'x': (45, False),
-    'y': (21, False), 'z': (44, False),
-    '1': (2, False),  '2': (3, False),  '3': (4, False),  '4': (5, False),
-    '5': (6, False),  '6': (7, False),  '7': (8, False),  '8': (9, False),
-    '9': (10, False), '0': (11, False),
-    '-': (12, False), '=': (13, False), '[': (26, False), ']': (27, False),
-    '\\': (43, False), ';': (39, False), "'": (40, False), '`': (41, False),
-    ',': (51, False), '.': (52, False), '/': (53, False),
-    # Shifted variants
-    'A': (30, True), 'B': (48, True), 'C': (46, True), 'D': (32, True),
-    'E': (18, True), 'F': (33, True), 'G': (34, True), 'H': (35, True),
-    'I': (23, True), 'J': (36, True), 'K': (37, True), 'L': (38, True),
-    'M': (50, True), 'N': (49, True), 'O': (24, True), 'P': (25, True),
-    'Q': (16, True), 'R': (19, True), 'S': (31, True), 'T': (20, True),
-    'U': (22, True), 'V': (47, True), 'W': (17, True), 'X': (45, True),
-    'Y': (21, True), 'Z': (44, True),
-    '!': (2, True),  '@': (3, True),  '#': (4, True),  '$': (5, True),
-    '%': (6, True),  '^': (7, True),  '&': (8, True),  '*': (9, True),
-    '(': (10, True), ')': (11, True),
-    '_': (12, True), '+': (13, True), '{': (26, True), '}': (27, True),
-    '|': (43, True), ':': (39, True), '"': (40, True), '~': (41, True),
-    '<': (51, True), '>': (52, True), '?': (53, True),
 }
 
 def _ydotool_type_char(char):
     """Type a single character using ydotool (kernel uinput)."""
-    # Special keys (Enter, Tab, Space)
+    # Special non-printable keys use evdev keycodes
     if char in _YDOTOOL_SPECIAL_KEYS:
         kc = _YDOTOOL_SPECIAL_KEYS[char]
         subprocess.run(['ydotool', 'key', f'{kc}:1', f'{kc}:0'],
                        timeout=2, capture_output=True)
         return True
 
-    # Mapped keys (letters, digits, symbols)
-    if char in _YDOTOOL_KEYMAP:
-        kc, shifted = _YDOTOOL_KEYMAP[char]
-        if shifted:
-            # 42 = KEY_LEFTSHIFT
-            subprocess.run(['ydotool', 'key', '42:1', f'{kc}:1', f'{kc}:0', '42:0'],
-                           timeout=2, capture_output=True)
-        else:
-            subprocess.run(['ydotool', 'key', f'{kc}:1', f'{kc}:0'],
-                           timeout=2, capture_output=True)
-        return True
-
-    # Fallback: use ydotool type for any unmapped characters (Unicode etc.)
-    subprocess.run(['ydotool', 'type', '--key-delay', '0', '--', char],
+    # All printable characters: use ydotool type which handles
+    # character→keycode translation internally (including shift)
+    subprocess.run(['ydotool', 'type', '--key-delay', '0',
+                    '--key-hold', '20', '--', char],
                    timeout=2, capture_output=True)
     return True
 
