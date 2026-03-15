@@ -132,6 +132,7 @@ Contributions are welcome! Some ideas:
 - [ ] Configurable pause patterns (e.g., "thinking" pauses mid-sentence)
 - [ ] Support for typing from a file instead of clipboard
 - [ ] GUI frontend
+- [ ] Being able to type higher than 260 WPM
 
 ## 📄 License
 
