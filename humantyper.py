@@ -318,9 +318,8 @@ def type_backspace(count=1):
                 subprocess.run(['wtype', '-k', 'BackSpace'],
                                timeout=2, capture_output=True)
             elif backend == 'osascript':
-                subprocess.run(['osascript', '-e',
-                               'tell application "System Events" to key code 51'],
-                               timeout=2, capture_output=True)
+                # osascript backend now uses CoreGraphics via ctypes natively
+                _macos_type_char('\x08')  # We will map \x08 to backspace
             elif backend == 'win32':
                 _win32_press_vk(0x08)  # VK_BACK
             time.sleep(random.uniform(0.03, 0.08))
@@ -400,21 +399,85 @@ def _wayland_type_char(char):
     return True
 
 
-# ── macOS (osascript) ─────────────────────────────────────
+# ── macOS (CoreGraphics via ctypes) ───────────────────────
 
-_MACOS_KEYCODES = {'\n': 36, '\t': 48}  # Return, Tab
+_MAC_CG_READY = False
+_MAC_CG = None
+_MAC_CF = None
+
+_MACOS_KEYCODES = {'\n': 36, '\t': 48, ' ': 49, '\x08': 51}  # Return, Tab, Space, Backspace
+
+def _macos_init():
+    """Lazily initialize macOS CoreGraphics bindings."""
+    global _MAC_CG_READY, _MAC_CG, _MAC_CF
+    if _MAC_CG_READY:
+        return
+    import ctypes
+    import ctypes.util
+
+    cg_path = ctypes.util.find_library('CoreGraphics')
+    cf_path = ctypes.util.find_library('CoreFoundation')
+    if not cg_path or not cf_path:
+        return
+
+    _MAC_CG = ctypes.cdll.LoadLibrary(cg_path)
+    _MAC_CF = ctypes.cdll.LoadLibrary(cf_path)
+
+    _MAC_CF.CFRelease.argtypes = [ctypes.c_void_p]
+    _MAC_CG.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_bool]
+    _MAC_CG.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+    _MAC_CG.CGEventKeyboardSetUnicodeString.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint16)]
+    _MAC_CG.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+    _MAC_CG_READY = True
 
 def _macos_type_char(char):
+    """Type a single character on macOS using CoreGraphics."""
+    _macos_init()
+    
+    if not _MAC_CG_READY:
+        # Fallback to osascript if ctypes fails
+        if char in _MACOS_KEYCODES:
+            code = _MACOS_KEYCODES[char]
+            subprocess.run(['osascript', '-e', f'tell application "System Events" to key code {code}'], timeout=2, capture_output=True)
+        else:
+            escaped = char.replace('\\', '\\\\').replace('"', '\\"')
+            subprocess.run(['osascript', '-e', f'tell application "System Events" to keystroke "{escaped}"'], timeout=2, capture_output=True)
+        return True
+
+    import ctypes
+
+    # kCGHIDEventTap = 0
+    TAP_LOCATION = 0
+    
     if char in _MACOS_KEYCODES:
-        code = _MACOS_KEYCODES[char]
-        subprocess.run(['osascript', '-e',
-                       f'tell application "System Events" to key code {code}'],
-                       timeout=2, capture_output=True)
+        # Special keycode press
+        keycode = _MACOS_KEYCODES[char]
+        evt_down = _MAC_CG.CGEventCreateKeyboardEvent(None, keycode, True)
+        evt_up = _MAC_CG.CGEventCreateKeyboardEvent(None, keycode, False)
+        
+        _MAC_CG.CGEventPost(TAP_LOCATION, evt_down)
+        _MAC_CG.CGEventPost(TAP_LOCATION, evt_up)
+        
+        _MAC_CF.CFRelease(evt_down)
+        _MAC_CF.CFRelease(evt_up)
     else:
-        escaped = char.replace('\\', '\\\\').replace('"', '\\"')
-        subprocess.run(['osascript', '-e',
-                       f'tell application "System Events" to keystroke "{escaped}"'],
-                       timeout=2, capture_output=True)
+        # Unicode string press (keycode 0 means use the unicode string)
+        # Convert char to UTF-16 array
+        utf16_encoded = char.encode('utf-16le')
+        u_len = len(utf16_encoded) // 2
+        unichar_array = (ctypes.c_uint16 * u_len)()
+        ctypes.memmove(unichar_array, utf16_encoded, len(utf16_encoded))
+        
+        evt_down = _MAC_CG.CGEventCreateKeyboardEvent(None, 0, True)
+        _MAC_CG.CGEventKeyboardSetUnicodeString(evt_down, u_len, unichar_array)
+        _MAC_CG.CGEventPost(TAP_LOCATION, evt_down)
+        _MAC_CF.CFRelease(evt_down)
+
+        evt_up = _MAC_CG.CGEventCreateKeyboardEvent(None, 0, False)
+        _MAC_CG.CGEventKeyboardSetUnicodeString(evt_up, u_len, unichar_array)
+        _MAC_CG.CGEventPost(TAP_LOCATION, evt_up)
+        _MAC_CF.CFRelease(evt_up)
+        
     return True
 
 
