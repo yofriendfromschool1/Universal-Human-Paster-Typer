@@ -50,11 +50,11 @@ No `pip install` needed — it's a single Python file with no third-party depend
 
 | Platform | Typing Tool | Clipboard Tool | Auto-installed? |
 |----------|------------|----------------|:---:|
-| **Linux (X11)** | `xdotool` | `xclip` | ✅ |
-| **Linux (Wayland)** | `xdotool` (XWayland) or `wtype` | `wl-paste` | ✅ |
+| **Linux (X11)** | `xdotool or ydotool` | `xclip` | ✅ |
+| **Linux (Wayland)** | `xdotool or ydotool` (XWayland) or `wtype` | `wl-paste` | ✅ |
 | **macOS** | `osascript` (built-in) | `pbpaste` (built-in) | — |
 | **Windows** | Win32 `SendInput` (built-in) | PowerShell (built-in) | — |
-| **FreeBSD / OpenBSD** | `xdotool` | `xclip` | ✅ |
+| **FreeBSD / OpenBSD** | `xdotool or ydotool` | `xclip` | ✅ |
 
 On Linux/BSD, if dependencies are missing, HumanTyper will detect your package manager and offer to install them automatically:
 
