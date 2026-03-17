@@ -20,6 +20,7 @@ import os
 import signal
 import shutil
 import platform as platform_mod
+import re
 
 # ─── ANSI Colors ───────────────────────────────────────────
 class C:
@@ -66,6 +67,153 @@ NEARBY_KEYS = {
     '1': '2q',     '2': '13qw',  '3': '24we',  '4': '35er',
     '5': '46rt',   '6': '57ty',  '7': '68yu',  '8': '79ui',
     '9': '80io',   '0': '9op',
+}
+
+
+# ─── Synonym Dictionary for Word Substitution ─────────────
+# Used to simulate a student choosing/reconsidering word choices while drafting.
+# Organized by category; supports "simple", "moderate", and "complex" filtering.
+
+SYNONYMS = {
+    # ── Size / Scale ──
+    'big': ['large', 'huge', 'enormous', 'massive', 'substantial'],
+    'large': ['big', 'huge', 'sizable', 'vast', 'extensive'],
+    'small': ['little', 'tiny', 'minor', 'slight', 'compact'],
+    'little': ['small', 'tiny', 'minor', 'slight', 'brief'],
+    'tiny': ['small', 'little', 'minuscule', 'minute'],
+    'huge': ['enormous', 'massive', 'immense', 'vast', 'colossal'],
+    # ── Quality ──
+    'good': ['great', 'fine', 'excellent', 'positive', 'beneficial'],
+    'great': ['excellent', 'wonderful', 'fantastic', 'remarkable', 'outstanding'],
+    'bad': ['poor', 'terrible', 'awful', 'negative', 'dreadful'],
+    'terrible': ['awful', 'dreadful', 'horrible', 'atrocious'],
+    'nice': ['pleasant', 'lovely', 'agreeable', 'delightful', 'enjoyable'],
+    'beautiful': ['gorgeous', 'stunning', 'lovely', 'attractive', 'elegant'],
+    'ugly': ['unattractive', 'unsightly', 'hideous', 'grotesque'],
+    # ── Speed / Movement ──
+    'fast': ['quick', 'rapid', 'swift', 'speedy', 'hasty'],
+    'quick': ['fast', 'rapid', 'swift', 'prompt', 'brisk'],
+    'slow': ['gradual', 'leisurely', 'unhurried', 'sluggish', 'steady'],
+    'run': ['sprint', 'dash', 'jog', 'race', 'rush'],
+    'walk': ['stroll', 'wander', 'stride', 'amble', 'trek'],
+    # ── Common Verbs ──
+    'make': ['create', 'build', 'produce', 'construct', 'form'],
+    'get': ['obtain', 'acquire', 'receive', 'gain', 'secure'],
+    'give': ['provide', 'offer', 'present', 'supply', 'deliver'],
+    'take': ['grab', 'seize', 'acquire', 'claim', 'obtain'],
+    'put': ['place', 'set', 'position', 'lay', 'situate'],
+    'use': ['utilize', 'employ', 'apply', 'operate', 'leverage'],
+    'try': ['attempt', 'endeavor', 'strive', 'aim', 'seek'],
+    'find': ['discover', 'locate', 'uncover', 'detect', 'identify'],
+    'keep': ['maintain', 'preserve', 'retain', 'sustain', 'hold'],
+    'move': ['shift', 'transfer', 'relocate', 'transport'],
+    'work': ['labor', 'toil', 'operate', 'function', 'perform'],
+    'hold': ['grasp', 'grip', 'clutch', 'retain', 'maintain'],
+    'write': ['compose', 'draft', 'author', 'pen', 'inscribe'],
+    'read': ['study', 'examine', 'review', 'peruse', 'scan'],
+    'learn': ['study', 'discover', 'master', 'absorb', 'grasp'],
+    'teach': ['instruct', 'educate', 'train', 'coach', 'tutor'],
+    'lead': ['guide', 'direct', 'conduct', 'steer', 'head'],
+    'follow': ['pursue', 'trail', 'track', 'shadow', 'accompany'],
+    'leave': ['depart', 'exit', 'abandon', 'vacate', 'withdraw'],
+    'come': ['arrive', 'approach', 'appear', 'reach', 'emerge'],
+    'go': ['proceed', 'travel', 'advance', 'depart', 'journey'],
+    'see': ['observe', 'notice', 'witness', 'perceive', 'view'],
+    'look': ['glance', 'gaze', 'peer', 'stare', 'observe'],
+    'hear': ['listen', 'perceive', 'detect', 'overhear'],
+    'feel': ['sense', 'experience', 'perceive', 'detect', 'notice'],
+    'begin': ['start', 'commence', 'initiate', 'launch', 'undertake'],
+    'start': ['begin', 'commence', 'initiate', 'launch', 'embark'],
+    'end': ['finish', 'conclude', 'terminate', 'complete', 'cease'],
+    'stop': ['halt', 'cease', 'discontinue', 'pause', 'terminate'],
+    'change': ['alter', 'modify', 'transform', 'adjust', 'revise'],
+    'help': ['assist', 'aid', 'support', 'facilitate', 'enable'],
+    'grow': ['expand', 'develop', 'increase', 'flourish', 'thrive'],
+    'bring': ['carry', 'deliver', 'transport', 'convey', 'fetch'],
+    # ── Cognitive / Communication ──
+    'think': ['believe', 'consider', 'ponder', 'reflect', 'contemplate'],
+    'know': ['understand', 'realize', 'recognize', 'comprehend', 'grasp'],
+    'want': ['desire', 'wish', 'crave', 'seek', 'long'],
+    'need': ['require', 'demand', 'necessitate'],
+    'like': ['enjoy', 'appreciate', 'prefer', 'favor', 'admire'],
+    'love': ['adore', 'cherish', 'treasure', 'appreciate'],
+    'hate': ['despise', 'detest', 'loathe', 'abhor'],
+    'say': ['state', 'declare', 'mention', 'express', 'remark'],
+    'tell': ['inform', 'notify', 'advise', 'reveal', 'disclose'],
+    'ask': ['inquire', 'question', 'request', 'query', 'probe'],
+    'answer': ['respond', 'reply', 'address', 'resolve'],
+    'talk': ['speak', 'discuss', 'converse', 'chat', 'communicate'],
+    'show': ['demonstrate', 'display', 'reveal', 'exhibit', 'present'],
+    'explain': ['clarify', 'describe', 'illustrate', 'elaborate'],
+    # ── Emotions ──
+    'happy': ['glad', 'joyful', 'pleased', 'content', 'cheerful'],
+    'sad': ['unhappy', 'sorrowful', 'melancholy', 'gloomy', 'dejected'],
+    'angry': ['furious', 'irate', 'enraged', 'livid', 'outraged'],
+    'scared': ['afraid', 'frightened', 'terrified', 'anxious', 'fearful'],
+    'calm': ['peaceful', 'serene', 'tranquil', 'composed', 'relaxed'],
+    # ── Descriptors ──
+    'important': ['significant', 'crucial', 'essential', 'vital', 'critical'],
+    'interesting': ['fascinating', 'intriguing', 'compelling', 'engaging'],
+    'difficult': ['challenging', 'tough', 'demanding', 'complex', 'arduous'],
+    'easy': ['simple', 'straightforward', 'effortless', 'uncomplicated'],
+    'hard': ['difficult', 'tough', 'demanding', 'challenging', 'strenuous'],
+    'simple': ['easy', 'basic', 'straightforward', 'uncomplicated', 'plain'],
+    'complex': ['complicated', 'intricate', 'elaborate', 'sophisticated'],
+    'strong': ['powerful', 'robust', 'sturdy', 'mighty', 'forceful'],
+    'weak': ['feeble', 'frail', 'fragile', 'delicate', 'flimsy'],
+    'new': ['novel', 'fresh', 'recent', 'modern', 'innovative'],
+    'old': ['ancient', 'aged', 'vintage', 'antique', 'elderly'],
+    'long': ['lengthy', 'extended', 'prolonged', 'extensive'],
+    'short': ['brief', 'concise', 'compact', 'abbreviated'],
+    'bright': ['brilliant', 'vivid', 'radiant', 'luminous', 'dazzling'],
+    'dark': ['dim', 'shadowy', 'gloomy', 'murky', 'obscure'],
+    'hot': ['warm', 'scorching', 'blazing', 'sweltering', 'heated'],
+    'cold': ['chilly', 'freezing', 'frigid', 'icy', 'frosty'],
+    'clean': ['spotless', 'pristine', 'tidy', 'immaculate'],
+    'dirty': ['filthy', 'grimy', 'soiled', 'messy', 'unclean'],
+    'rich': ['wealthy', 'affluent', 'prosperous', 'opulent'],
+    'true': ['accurate', 'correct', 'genuine', 'authentic', 'valid'],
+    'false': ['incorrect', 'untrue', 'inaccurate', 'wrong', 'mistaken'],
+    'right': ['correct', 'proper', 'appropriate', 'suitable', 'accurate'],
+    'wrong': ['incorrect', 'mistaken', 'inaccurate', 'improper', 'faulty'],
+    'different': ['distinct', 'diverse', 'varied', 'unique', 'contrasting'],
+    'same': ['identical', 'similar', 'equivalent', 'comparable'],
+    'main': ['primary', 'principal', 'chief', 'central', 'key'],
+    'real': ['genuine', 'authentic', 'actual', 'legitimate'],
+    'clear': ['obvious', 'evident', 'apparent', 'transparent', 'distinct'],
+    'possible': ['feasible', 'viable', 'potential', 'achievable'],
+    'common': ['frequent', 'widespread', 'prevalent', 'typical', 'usual'],
+    'rare': ['uncommon', 'unusual', 'scarce', 'exceptional', 'infrequent'],
+    'special': ['unique', 'distinctive', 'exceptional', 'remarkable'],
+    'general': ['broad', 'overall', 'widespread', 'universal'],
+    'specific': ['particular', 'precise', 'exact', 'definite', 'detailed'],
+    # ── Quantity ──
+    'many': ['numerous', 'several', 'multiple', 'countless', 'abundant'],
+    'few': ['scarce', 'limited', 'sparse', 'rare'],
+    'some': ['several', 'certain', 'various'],
+    # ── Transition / Linking Words ──
+    'also': ['additionally', 'furthermore', 'moreover', 'likewise'],
+    'however': ['nevertheless', 'nonetheless', 'yet', 'though'],
+    'therefore': ['consequently', 'hence', 'thus', 'accordingly'],
+    'although': ['though', 'while', 'whereas', 'despite'],
+    # ── Essay Nouns ──
+    'problem': ['issue', 'challenge', 'difficulty', 'obstacle', 'dilemma'],
+    'idea': ['concept', 'notion', 'thought', 'theory', 'proposal'],
+    'way': ['method', 'approach', 'manner', 'technique', 'strategy'],
+    'part': ['component', 'element', 'portion', 'segment', 'section'],
+    'place': ['location', 'area', 'site', 'spot', 'position'],
+    'world': ['globe', 'planet', 'realm', 'domain'],
+    'group': ['team', 'collective', 'assembly', 'cluster'],
+    'point': ['aspect', 'matter', 'detail', 'factor', 'element'],
+    'fact': ['truth', 'reality', 'certainty', 'detail'],
+    'result': ['outcome', 'consequence', 'effect', 'finding'],
+    'reason': ['cause', 'motive', 'basis', 'rationale'],
+    'power': ['strength', 'force', 'authority', 'influence'],
+    'area': ['region', 'zone', 'district', 'sector', 'territory'],
+    'story': ['tale', 'narrative', 'account', 'chronicle'],
+    'example': ['instance', 'illustration', 'case', 'sample', 'model'],
+    'study': ['research', 'analysis', 'investigation', 'examination'],
+    'effect': ['impact', 'influence', 'consequence', 'outcome'],
 }
 
 # ─── Globals ───────────────────────────────────────────────
@@ -804,6 +952,7 @@ def check_dependencies():
         return False
 
 
+
 # ═══════════════════════════════════════════════════════════
 #  TYPO SIMULATION
 # ═══════════════════════════════════════════════════════════
@@ -828,7 +977,82 @@ def make_error(char, error_type):
 
 
 # ═══════════════════════════════════════════════════════════
-#  WPM TIMING (clock-based scheduling)
+#  SYNONYM / WORD SUBSTITUTION HELPERS
+# ═══════════════════════════════════════════════════════════
+
+def get_synonym(word, complexity='moderate'):
+    """Look up a synonym for a word, filtered by complexity preference.
+
+    complexity:
+        'simple'   — prefer shorter synonyms (casual vocabulary)
+        'moderate' — any synonym
+        'complex'  — prefer longer synonyms (formal vocabulary)
+    """
+    lookup = word.lower().strip()
+    candidates = SYNONYMS.get(lookup)
+    if not candidates:
+        return None
+
+    if complexity == 'simple':
+        filtered = [w for w in candidates if len(w) <= len(lookup)]
+        pool = filtered if filtered else candidates
+    elif complexity == 'complex':
+        filtered = [w for w in candidates if len(w) >= len(lookup)]
+        pool = filtered if filtered else candidates
+    else:
+        pool = candidates
+
+    chosen = random.choice(pool)
+
+    # Preserve original capitalization pattern
+    if word.isupper():
+        return chosen.upper()
+    elif word[0].isupper():
+        return chosen.capitalize()
+    return chosen
+
+
+def tokenize_text(text):
+    """Split text into (type, content) tokens preserving everything.
+
+    Returns list of ('word', 'Hello') or ('other', ' ,...\\n') tuples.
+    """
+    tokens = []
+    for match in re.finditer(r"[a-zA-Z']+|[^a-zA-Z']+", text):
+        content = match.group()
+        if content[0].isalpha():
+            tokens.append(('word', content))
+        else:
+            tokens.append(('other', content))
+    return tokens
+
+
+def create_bursts(tokens, burst_size):
+    """Group tokens into bursts of approximately burst_size words each.
+
+    Each burst is a contiguous slice of tokens that contains ~burst_size
+    word tokens (plus the non-word tokens between/around them).
+    """
+    bursts = []
+    current_burst = []
+    word_count = 0
+
+    for token in tokens:
+        current_burst.append(token)
+        if token[0] == 'word':
+            word_count += 1
+            if word_count >= burst_size:
+                bursts.append(current_burst)
+                current_burst = []
+                word_count = 0
+
+    if current_burst:
+        bursts.append(current_burst)
+    return bursts
+
+
+# ═══════════════════════════════════════════════════════════
+#  WPM TIMING (clock-based scheduling with fatigue)
 # ═══════════════════════════════════════════════════════════
 
 def compute_target_times(text, wpm):
@@ -878,27 +1102,57 @@ def compute_target_times(text, wpm):
 
 
 # ═══════════════════════════════════════════════════════════
-#  TYPING SIMULATION
+#  TYPING SIMULATION (burst + substitution + fatigue)
 # ═══════════════════════════════════════════════════════════
 
-def simulate_typing(text, wpm, error_rate, delay_seconds):
-    """Main typing simulation loop with clock-based WPM scheduling."""
+def _is_sentence_start(tokens, token_idx):
+    """Check if this word token is at the start of a sentence."""
+    # Look backward for sentence-ending punctuation
+    for i in range(token_idx - 1, -1, -1):
+        t_type, t_content = tokens[i]
+        if t_type == 'other':
+            if any(c in t_content for c in '.!?'):
+                return True
+            if '\n' in t_content:
+                return True
+        else:
+            return False  # Found a word before any sentence-ender
+    return token_idx == 0  # First token = start of text
+
+
+def simulate_typing(text, config):
+    """Main typing simulation with burst mode, word substitution, and fatigue."""
     global stop_typing
     stop_typing = False
     signal.signal(signal.SIGINT, signal_handler)
 
-    targets = compute_target_times(text, wpm)
+    delay_seconds = config['delay']
+    wpm = config['wpm']
+    error_rate = config['error_rate']
+
+    # Tokenize text
+    tokens = tokenize_text(text)
+
+    # Create bursts
+    if config['burst_enabled']:
+        bursts = create_bursts(tokens, config['burst_words'])
+    else:
+        bursts = [tokens]
 
     # ── Countdown ──────────────────────────────────────
-    print(f"\n  {C.YELLOW}{C.BOLD}⏱  Starting in {delay_seconds} seconds...{C.RESET}")
+    print(f"\n  {C.YELLOW}{C.BOLD}⏱  Starting in {delay_seconds:.1f} seconds...{C.RESET}")
     print(f"  {C.DIM}Switch to your target window now!{C.RESET}")
     print(f"  {C.DIM}Press Ctrl+C to cancel{C.RESET}\n")
 
     try:
-        for remaining in range(delay_seconds, 0, -1):
-            sys.stdout.write(f"\r  {C.CYAN}{C.BOLD}  ▸ {remaining}...{C.RESET}  ")
+        remaining = delay_seconds
+        while remaining > 0:
+            display_val = remaining if remaining >= 1 else round(remaining, 1)
+            sys.stdout.write(f"\r  {C.CYAN}{C.BOLD}  ▸ {display_val}...{C.RESET}  ")
             sys.stdout.flush()
-            time.sleep(1)
+            sleep_step = min(remaining, 0.5 if remaining < 2 else 1.0)
+            time.sleep(sleep_step)
+            remaining -= sleep_step
             if stop_typing:
                 print(f"\n\n  {C.RED}✗ Cancelled.{C.RESET}\n")
                 return
@@ -910,56 +1164,181 @@ def simulate_typing(text, wpm, error_rate, delay_seconds):
 
     # ── Typing Loop ────────────────────────────────────
     total_chars = len(text)
+    total_words = sum(1 for t in tokens if t[0] == 'word')
     errors_made = 0
+    substitutions_made = 0
     chars_typed = 0
-    start_time = time.perf_counter()
+    global_word_count = 0
+    rereading_counter = 0
+    rereading_threshold = random.randint(15, 40)
+    sentence_word_idx = 0  # Words since sentence start
 
-    for i, char in enumerate(text):
+    for burst_idx, burst_tokens in enumerate(bursts):
         if stop_typing:
             break
 
-        # Clock-based scheduling: sleep only until target timestamp
-        wait = targets[i] - (time.perf_counter() - start_time)
-        if wait > 0:
-            time.sleep(wait)
+        # ── Compute timing for this burst ──────────────
+        burst_text = ''.join(t[1] for t in burst_tokens)
+        progress = chars_typed / total_chars if total_chars > 0 else 0
+        effective_wpm = wpm * (1.0 - config['fatigue_rate'] * progress)
+        effective_wpm = max(effective_wpm, 10)
 
-        # Error simulation
-        should_error = (
-            random.random() < error_rate
-            and char.isalpha() and i > 0 and i < total_chars - 1
-        )
+        targets = compute_target_times(burst_text, effective_wpm)
+        burst_start = time.perf_counter()
+        char_offset = 0  # index into targets[] for this burst
 
-        if should_error:
-            error_type = random.choices([1, 2], weights=[70, 30], k=1)[0]
-            error = make_error(char, error_type)
+        for tok_idx_in_burst, (tok_type, tok_content) in enumerate(burst_tokens):
+            if stop_typing:
+                break
 
-            if error:
-                errors_made += 1
-                err_kind, err_char = error
+            global_tok_idx = sum(len(b) for b in bursts[:burst_idx]) + tok_idx_in_burst
 
-                if err_kind == 'wrong_key':
-                    type_char(err_char)
-                    time.sleep(random.uniform(0.15, 0.5))
-                    if random.random() < 0.3 and i + 1 < total_chars:
-                        type_char(text[i + 1])
-                        time.sleep(random.uniform(0.2, 0.6))
-                        type_backspace(2)
-                    else:
-                        type_backspace(1)
-                    time.sleep(random.uniform(0.05, 0.15))
-                    type_char(char)
+            if tok_type == 'word':
+                global_word_count += 1
+                rereading_counter += 1
+                sentence_word_idx += 1
 
-                elif err_kind == 'double':
-                    type_char(char)
-                    type_char(char)
-                    time.sleep(random.uniform(0.15, 0.45))
-                    type_backspace(1)
+                # ── Sentence-start detection ───────────
+                if _is_sentence_start(tokens, global_tok_idx):
+                    sentence_word_idx = 1
+
+                # ── Micro-hesitation before long words ─
+                if config['hesitation_enabled'] and len(tok_content) >= 8:
+                    hesit = random.uniform(0.1, 0.5)
+                    time.sleep(hesit)
+
+                # ── Word substitution check ────────────
+                should_sub = (
+                    config['substitute_enabled']
+                    and random.random() < config['substitute_rate']
+                    and len(tok_content) >= 3
+                    and tok_content.isalpha()
+                )
+                synonym = get_synonym(tok_content, config['substitute_complexity']) if should_sub else None
+
+                if synonym and synonym.lower() != tok_content.lower():
+                    substitutions_made += 1
+
+                    # Type the synonym (slightly faster — confident wrong word)
+                    for sc in synonym:
+                        if stop_typing:
+                            break
+                        type_char(sc)
+                        time.sleep(random.uniform(0.03, 0.09))
+
+                    # Pause — "noticing" the wrong word choice
+                    time.sleep(random.uniform(0.4, 1.8))
+
+                    # Backspace the synonym
+                    type_backspace(len(synonym))
+                    time.sleep(random.uniform(0.1, 0.4))
+
+                    # Retype the correct word on-timeline
+                    for c in tok_content:
+                        if stop_typing:
+                            break
+                        if char_offset < len(targets):
+                            wait = targets[char_offset] - (time.perf_counter() - burst_start)
+                            if wait > 0:
+                                time.sleep(wait)
+                        type_char(c)
+                        chars_typed += 1
+                        char_offset += 1
+                else:
+                    # ── Normal word typing with optional errors ──
+                    # Sentence-start slowdown: first 1-2 words are ~20% slower
+                    slow_factor = 1.0
+                    if sentence_word_idx <= 2:
+                        slow_factor = random.uniform(1.15, 1.30)
+
+                    for ci, c in enumerate(tok_content):
+                        if stop_typing:
+                            break
+
+                        if char_offset < len(targets):
+                            wait = targets[char_offset] - (time.perf_counter() - burst_start)
+                            if wait > 0:
+                                time.sleep(wait * slow_factor)
+
+                        # Error simulation
+                        should_error = (
+                            random.random() < error_rate
+                            and c.isalpha()
+                            and ci > 0
+                            and ci < len(tok_content) - 1
+                        )
+
+                        if should_error:
+                            error_type = random.choices([1, 2], weights=[70, 30], k=1)[0]
+                            error = make_error(c, error_type)
+
+                            if error:
+                                errors_made += 1
+                                err_kind, err_char = error
+
+                                if err_kind == 'wrong_key':
+                                    type_char(err_char)
+                                    time.sleep(random.uniform(0.15, 0.5))
+                                    if random.random() < 0.3 and ci + 1 < len(tok_content):
+                                        type_char(tok_content[ci + 1])
+                                        time.sleep(random.uniform(0.2, 0.6))
+                                        type_backspace(2)
+                                    else:
+                                        type_backspace(1)
+                                    time.sleep(random.uniform(0.05, 0.15))
+                                    type_char(c)
+
+                                elif err_kind == 'double':
+                                    type_char(c)
+                                    type_char(c)
+                                    time.sleep(random.uniform(0.15, 0.45))
+                                    type_backspace(1)
+                            else:
+                                type_char(c)
+                        else:
+                            type_char(c)
+
+                        chars_typed += 1
+                        char_offset += 1
+
+                # ── Re-reading pause (as if scanning what was typed) ─
+                if config['rereading_enabled'] and rereading_counter >= rereading_threshold:
+                    rereading_counter = 0
+                    rereading_threshold = random.randint(15, 40)
+                    time.sleep(random.uniform(
+                        config.get('rereading_pause_min', 0.5),
+                        config.get('rereading_pause_max', 2.0)
+                    ))
+
             else:
-                type_char(char)
-        else:
-            type_char(char)
+                # ── Non-word tokens (whitespace, punctuation) ──
+                for c in tok_content:
+                    if stop_typing:
+                        break
+                    if char_offset < len(targets):
+                        wait = targets[char_offset] - (time.perf_counter() - burst_start)
+                        if wait > 0:
+                            time.sleep(wait)
+                    type_char(c)
+                    chars_typed += 1
+                    char_offset += 1
 
-        chars_typed += 1
+                # Paragraph thinking pause
+                if '\n\n' in tok_content or '\r\n\r\n' in tok_content:
+                    para_pause = random.uniform(
+                        config['paragraph_pause_min'],
+                        config['paragraph_pause_max']
+                    )
+                    time.sleep(para_pause)
+
+                # Reset sentence word count after sentence-ending punctuation
+                if any(c in tok_content for c in '.!?'):
+                    sentence_word_idx = 0
+
+        # ── Burst pause (thinking / brainstorming between bursts) ──
+        if config['burst_enabled'] and burst_idx < len(bursts) - 1:
+            pause = random.uniform(config['burst_pause_min'], config['burst_pause_max'])
+            time.sleep(pause)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -967,7 +1346,7 @@ def simulate_typing(text, wpm, error_rate, delay_seconds):
         print(f"\n  {C.YELLOW}⚠  Typing interrupted at character {chars_typed}/{total_chars}{C.RESET}")
     else:
         print(f"\n  {C.GREEN}{C.BOLD}✓ Done!{C.RESET}")
-    print(f"  {C.DIM}Characters typed: {chars_typed} | Errors simulated: {errors_made}{C.RESET}\n")
+    print(f"  {C.DIM}Characters typed: {chars_typed} | Errors simulated: {errors_made} | Word substitutions: {substitutions_made}{C.RESET}\n")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1010,6 +1389,27 @@ def get_float_input(prompt, default, min_val, max_val):
             print(f"  {C.RED}Please enter a value between {min_val} and {max_val}{C.RESET}")
         except ValueError:
             print(f"  {C.RED}Please enter a valid number{C.RESET}")
+
+
+def get_choice_input(prompt, options, default):
+    """Get a choice from a list of options."""
+    options_str = '/'.join(options)
+    while True:
+        raw = input(f"  {prompt} ({options_str}) {C.DIM}[{default}]{C.RESET}: ").strip().lower()
+        if raw == '':
+            return default
+        if raw in options:
+            return raw
+        print(f"  {C.RED}Please choose from: {options_str}{C.RESET}")
+
+
+def get_bool_input(prompt, default=False):
+    """Get a yes/no input."""
+    default_str = 'Y/n' if default else 'y/N'
+    raw = input(f"  {prompt} {C.DIM}[{default_str}]{C.RESET}: ").strip().lower()
+    if raw == '':
+        return default
+    return raw in ('y', 'yes')
 
 
 def preview_text(text, max_lines=6, max_width=60):
@@ -1057,13 +1457,13 @@ def main():
     print()
     preview_text(clipboard)
 
-    # ── Configuration ──────────────────────────────────
-    print(f"  {C.CYAN}{C.BOLD}⚙  Configuration{C.RESET}")
+    # ── Basic Configuration ───────────────────────────
+    print(f"  {C.CYAN}{C.BOLD}⚙  Basic Configuration{C.RESET}")
     print(f"  {C.DIM}Press Enter to accept defaults{C.RESET}\n")
 
-    delay = get_int_input(
-        f"{C.YELLOW}⏱  Delay before typing (seconds){C.RESET}",
-        default=5, min_val=1, max_val=120)
+    delay = get_float_input(
+        f"{C.YELLOW}⏱  Delay before typing (0-500 seconds){C.RESET}",
+        default=5.0, min_val=0.0, max_val=500.0)
 
     wpm = get_int_input(
         f"{C.YELLOW}⚡ Typing speed (WPM){C.RESET}",
@@ -1074,20 +1474,126 @@ def main():
         default=3.0, min_val=0.0, max_val=15.0)
     error_rate = error_pct / 100.0
 
+    # ── Default config ────────────────────────────────
+    config = {
+        'delay': delay,
+        'wpm': wpm,
+        'error_rate': error_rate,
+        # Burst defaults
+        'burst_enabled': True,
+        'burst_words': 8,
+        'burst_pause_min': 2.0,
+        'burst_pause_max': 5.0,
+        # Substitution defaults
+        'substitute_enabled': True,
+        'substitute_rate': 0.03,
+        'substitute_complexity': 'moderate',
+        # Human-like defaults
+        'fatigue_rate': 0.10,
+        'paragraph_pause_min': 2.0,
+        'paragraph_pause_max': 8.0,
+        'hesitation_enabled': True,
+        'rereading_enabled': True,
+        'rereading_pause_min': 0.5,
+        'rereading_pause_max': 2.0,
+    }
+
+    # ── Advanced Configuration ────────────────────────
+    print()
+    advanced = get_bool_input(
+        f"{C.CYAN}{C.BOLD}🔧 Configure advanced settings?{C.RESET}", default=False)
+
+    if advanced:
+        print(f"\n  {C.CYAN}{C.BOLD}── Burst Typing ──{C.RESET}")
+        print(f"  {C.DIM}Simulates writing in bursts then pausing to think{C.RESET}\n")
+
+        config['burst_enabled'] = get_bool_input(
+            f"{C.YELLOW}  Enable burst typing?{C.RESET}", default=True)
+
+        if config['burst_enabled']:
+            config['burst_words'] = get_int_input(
+                f"{C.YELLOW}  Words per burst{C.RESET}",
+                default=8, min_val=1, max_val=100)
+            config['burst_pause_min'] = get_float_input(
+                f"{C.YELLOW}  Min thinking pause between bursts (sec){C.RESET}",
+                default=2.0, min_val=0.0, max_val=500.0)
+            config['burst_pause_max'] = get_float_input(
+                f"{C.YELLOW}  Max thinking pause between bursts (sec){C.RESET}",
+                default=5.0, min_val=config['burst_pause_min'], max_val=500.0)
+
+        print(f"\n  {C.CYAN}{C.BOLD}── Word Substitution (Draft Corrections) ──{C.RESET}")
+        print(f"  {C.DIM}Simulates typing a wrong word then correcting it{C.RESET}\n")
+
+        config['substitute_enabled'] = get_bool_input(
+            f"{C.YELLOW}  Enable word substitution?{C.RESET}", default=True)
+
+        if config['substitute_enabled']:
+            sub_pct = get_float_input(
+                f"{C.YELLOW}  Substitution rate (0-50%){C.RESET}",
+                default=3.0, min_val=0.0, max_val=50.0)
+            config['substitute_rate'] = sub_pct / 100.0
+            config['substitute_complexity'] = get_choice_input(
+                f"{C.YELLOW}  Word complexity{C.RESET}",
+                ['simple', 'moderate', 'complex'], default='moderate')
+
+        print(f"\n  {C.CYAN}{C.BOLD}── Human-like Behavior ──{C.RESET}")
+        print(f"  {C.DIM}Fatigue, hesitations, and natural pauses{C.RESET}\n")
+
+        fatigue_pct = get_float_input(
+            f"{C.YELLOW}  Fatigue slowdown (0-30%, max speed decrease by end){C.RESET}",
+            default=10.0, min_val=0.0, max_val=30.0)
+        config['fatigue_rate'] = fatigue_pct / 100.0
+
+        config['paragraph_pause_min'] = get_float_input(
+            f"{C.YELLOW}  Min paragraph pause (sec){C.RESET}",
+            default=2.0, min_val=0.0, max_val=500.0)
+        config['paragraph_pause_max'] = get_float_input(
+            f"{C.YELLOW}  Max paragraph pause (sec){C.RESET}",
+            default=8.0, min_val=config['paragraph_pause_min'], max_val=500.0)
+
+        config['hesitation_enabled'] = get_bool_input(
+            f"{C.YELLOW}  Hesitate before long words?{C.RESET}", default=True)
+
+        config['rereading_enabled'] = get_bool_input(
+            f"{C.YELLOW}  Simulate re-reading pauses?{C.RESET}", default=True)
+
+        if config['rereading_enabled']:
+            config['rereading_pause_min'] = get_float_input(
+                f"{C.YELLOW}  Min re-reading pause (sec){C.RESET}",
+                default=0.5, min_val=0.0, max_val=500.0)
+            config['rereading_pause_max'] = get_float_input(
+                f"{C.YELLOW}  Max re-reading pause (sec){C.RESET}",
+                default=2.0, min_val=config['rereading_pause_min'], max_val=500.0)
+
     # ── Summary ────────────────────────────────────────
     print(f"\n  {C.DIM}{'─' * 50}{C.RESET}")
     print(f"  {C.WHITE}{C.BOLD}📝 Ready to type:{C.RESET}")
-    print(f"    {C.CYAN}•{C.RESET} Delay:      {C.WHITE}{delay}s{C.RESET}")
-    print(f"    {C.CYAN}•{C.RESET} Speed:      {C.WHITE}{wpm} WPM{C.RESET}")
-    print(f"    {C.CYAN}•{C.RESET} Error rate: {C.WHITE}{error_pct}%{C.RESET}")
-    print(f"    {C.CYAN}•{C.RESET} Characters: {C.WHITE}{len(clipboard)}{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Delay:           {C.WHITE}{config['delay']:.1f}s{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Speed:           {C.WHITE}{config['wpm']} WPM{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Error rate:      {C.WHITE}{config['error_rate']*100:.1f}%{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Characters:      {C.WHITE}{len(clipboard)}{C.RESET}")
 
-    est_minutes = len(clipboard) / (wpm * 5)
+    if config['burst_enabled']:
+        print(f"    {C.CYAN}•{C.RESET} Burst:           {C.WHITE}{config['burst_words']} words, {config['burst_pause_min']:.1f}-{config['burst_pause_max']:.1f}s pause{C.RESET}")
+    else:
+        print(f"    {C.CYAN}•{C.RESET} Burst:           {C.DIM}off{C.RESET}")
+
+    if config['substitute_enabled']:
+        print(f"    {C.CYAN}•{C.RESET} Substitution:   {C.WHITE}{config['substitute_rate']*100:.1f}% ({config['substitute_complexity']}){C.RESET}")
+    else:
+        print(f"    {C.CYAN}•{C.RESET} Substitution:   {C.DIM}off{C.RESET}")
+
+    print(f"    {C.CYAN}•{C.RESET} Fatigue:         {C.WHITE}{config['fatigue_rate']*100:.0f}% slowdown{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Paragraph pause: {C.WHITE}{config['paragraph_pause_min']:.1f}-{config['paragraph_pause_max']:.1f}s{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Long-word hesit: {C.WHITE}{'on' if config['hesitation_enabled'] else 'off'}{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Re-reading:      {C.WHITE}{'on' if config['rereading_enabled'] else 'off'}{C.RESET}")
+
+    est_minutes = len(clipboard) / (config['wpm'] * 5)
     if est_minutes < 1:
         est_str = f"{int(est_minutes * 60)}s"
     else:
         est_str = f"{est_minutes:.1f}min"
-    print(f"    {C.CYAN}•{C.RESET} Est. time:  {C.WHITE}~{est_str}{C.RESET}")
+    print(f"    {C.CYAN}•{C.RESET} Est. base time: {C.WHITE}~{est_str}{C.RESET} {C.DIM}(+pauses/bursts){C.RESET}")
     print(f"  {C.DIM}{'─' * 50}{C.RESET}")
 
     # ── Confirm ────────────────────────────────────────
@@ -1097,7 +1603,7 @@ def main():
         print(f"\n  {C.DIM}Bye!{C.RESET}\n")
         sys.exit(0)
 
-    simulate_typing(clipboard, wpm, error_rate, delay)
+    simulate_typing(clipboard, config)
 
 
 if __name__ == '__main__':
