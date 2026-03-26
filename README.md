@@ -17,6 +17,9 @@
   <img src="https://img.shields.io/badge/150%2B%20synonyms-built--in-blueviolet?style=flat-square" alt="Built-in synonyms">
 </p>
 
+--- 
+## Chrome Extension
+https://github.com/yofriendfromschool1/Chrome-Extension-Human-Typer-Paster
 ---
 
 ## ✨ Features
